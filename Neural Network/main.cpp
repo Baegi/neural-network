@@ -55,8 +55,8 @@ void Neuron::updateInputWeights(Layer &prevLayer){
             + alpha
             * oldDeltaWeight;
 
-        neuron.outputWeights[i].deltaWeight = newDeltaWeight;
-        neuron.outputWeights[i].weight += newDeltaWeight;
+        neuron.outputWeights[index].deltaWeight = newDeltaWeight;
+        neuron.outputWeights[index].weight += newDeltaWeight;
     }
 }
 
@@ -68,6 +68,7 @@ double Neuron::sumDOW(const Layer &nextLayer) const{
     for(unsigned i = 0; i < nextLayer.size(); ++i){
         sum += outputWeights[i].weight * nextLayer[i].gradient;
     }
+    return sum;
 }
 
 void Neuron::calcHiddenGradients(const Layer &nextLayer){
@@ -94,10 +95,10 @@ void Neuron::feedForward(const Layer &prevLayer){
     double sum = 0.0;
 
     for(unsigned i = 0; i < prevLayer.size(); ++i){
-        sum += prevLayer[i].getOutput();
+        sum += prevLayer[i].getOutput() *
         prevLayer[i].outputWeights[index].weight;
     }
-
+    sum /= prevLayer.size();
     output = Neuron::transferFunction(sum);
 }
 
@@ -117,15 +118,15 @@ public:
 
     void feedForward(const vector<double> &inputValues);
     void backProp(const vector<double> &targetValues);
-    void getResults(vector<double> &resultValues) const;
+    void getResults(vector<double> &resultValues);
 private:
     vector<Layer> layers; //layers[layerNum][neuronNum]
     double error;
     double recentAverageError;
-    double recentAverageSmoothingFactor;
+    double recentAverageSmoothingFactor = 0; //change later
 };
 
-void Net::getResults(vector<double> &resultValues) const{
+void Net::getResults(vector<double> &resultValues){
     resultValues.clear();
     for(unsigned i = 0; i < layers.back().size() - 1; ++i){
         resultValues.push_back(layers.back()[i].getOutput());
@@ -136,56 +137,63 @@ void Net::backProp(const vector<double> &targetValues){
     // calculate overall net error (RMS of output neuron errors)
     Layer &outputLayer = layers.back();
     error = 0.0;
-    for(int i = 0; i < outputLayer.size() - 1; ++i){
+    for(unsigned i = 0; i < outputLayer.size() - 1; ++i){
         double delta = targetValues[i] - outputLayer[i].getOutput();
         error += delta*delta;
     }
-    error /= outputLayer.size();
+    error /= (outputLayer.size() - 1);
     error = sqrt(error); // bc RMS
+
+//    cerr << "RMS of errors: " << error << '\n';
 
     // implement a recent average measurement
     recentAverageError = (recentAverageError * recentAverageSmoothingFactor + error) / (recentAverageSmoothingFactor + 1.0);
 
+//     cerr << "recent average error: " << recentAverageError << '\n';
+
     // calculate output layer gradients
-    for(int i = 0; i < outputLayer.size(); ++i){
+    for(unsigned i = 0; i < outputLayer.size(); ++i){
         outputLayer[i].calcOutputGradients(targetValues[i]);
     }
+
 
     // calculate gradients on hidden layers
     for(unsigned i = layers.size() - 2; i > 0; --i){
         Layer &hiddenLayer = layers[i];
         Layer &nextLayer = layers[i + 1];
 
-        for(unsigned j = 0; j < hiddenLayer.size(); ++i){
+        for(unsigned j = 0; j < hiddenLayer.size(); ++j){
             hiddenLayer[i].calcHiddenGradients(nextLayer);
         }
     }
 
+//    cerr << "Gradients calculated\n";
+
     // for all layers from outputs to first hidden layer, update connection weights
     for(unsigned i = layers.size() - 1; i > 0; --i){
-        Layer &layer = layers[i];
         Layer &prevLayer = layers[i - 1];
-
-        for(unsigned j = 0; j < layer.size(); ++j){
-            layer[j].updateInputWeights(prevLayer);
+        for(unsigned j = 0; j < layers[i].size() - 1; ++j){
+            layers[i][j].updateInputWeights(prevLayer);
+//            cerr << "updated input weights for neuron " << i << ',' << j << '\n';
         }
     }
+//    cerr << "weights updated\n";
 
 
 };
 
 void Net::feedForward(const vector<double> &inputValues){
-    assert(inputValues.size() == layers[0].size() - 1);
-
     for(unsigned i = 0; i < inputValues.size(); ++i){
         layers[0][i].setOutput(inputValues[i]);
     }
+//    cerr << "set output for all bias neurons\n";
 
     // forward propagation
-    for(unsigned i = 0; i <= layers.size(); ++i){
+    for(unsigned i = 1; i < layers.size(); ++i){
         Layer &prevLayer = layers[i-1];
         for(unsigned j = 0; j < layers[i].size(); ++j){
             layers[i][j].feedForward(prevLayer);
+//            cerr << "neuron " << i << ',' << j << " fed forward\n";
         }
     }
 
@@ -199,9 +207,9 @@ Net::Net(const vector<unsigned> &topology){
         unsigned numOutputs = i == topology.size() - 1 ? 0 : topology[i + 1];
 
         //<= because of the bias Neuron
-        for(int j = 0; j <= topology[i]; ++j){
+        for(unsigned j = 0; j <= topology[i]; ++j){
             layers.back().push_back(Neuron(numOutputs, j));
-            cout << "Neuron added!\n";
+            cerr << "Neuron " << i << ',' << j << " created\n";
         }
         // force the bias neurons output value to 1.0
         layers.back().back().setOutput(1.0);
@@ -209,34 +217,43 @@ Net::Net(const vector<unsigned> &topology){
 }
 
 
-int main()
-{
-    vector<unsigned> topology = {0, 2, 1};
-    Net net(topology);
+vector<double> inputValues;
+vector<double> targetValues;
+vector<double> resultValues;
+vector<unsigned> topology = {2, 4, 1};
+Net net(topology);
 
-    vector<double> inputValues;
+void netStuff(void){
     net.feedForward(inputValues);
-
-    vector<double> targetValues;
+//    cerr << "fed everything forward\n";
     net.backProp(targetValues);
-
-    vector<double> resultValues;
+//    cerr << "propagated back\n";
     net.getResults(resultValues);
+    for(unsigned i = 0; i < targetValues.size(); ++i){
+        cerr << "target value: " << targetValues[i] << ", result value: " << resultValues[i] << endl;
+    }
+}
 
 
 
 
+int main(){
 
+    //read input file from other program to test
+    ifstream input("input.txt");
+    double tmp;
 
-
-
-
-
-
-
-
-
-
+    for(unsigned i = 0; i < 100; ++i){
+        inputValues.clear();
+        targetValues.clear();
+        input >> tmp;
+        inputValues.push_back(tmp);
+        input >> tmp;
+        inputValues.push_back(tmp);
+        input >> tmp;
+        targetValues.push_back(tmp);
+        netStuff();
+    }
 
 
     return 0;
